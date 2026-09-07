@@ -200,7 +200,7 @@
   function renderIdle(spinning) {
     app.innerHTML =
       '<header><h1 class="title">🎰 幸運抽獎機</h1>' +
-      '<p class="subtitle">三個 💰 連線即中獎　・　每人僅限抽獎一次</p></header>' +
+      '<p class="subtitle">三個相同圖示連線即中獎　・　每人僅限抽獎一次</p></header>' +
       machineHTML(currentReels) +
       '<button id="draw-btn"' + (spinning ? " disabled" : "") + ">" +
       (spinning ? "好運降臨中…" : "開始抽獎") + "</button>";
@@ -240,7 +240,15 @@
     var isWin = roll[0] / 0xffffffff < WIN_PROBABILITY;
 
     var pick = function () { return SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)]; };
-    var finalReels = isWin ? [WIN_SYMBOL, WIN_SYMBOL, WIN_SYMBOL] : [pick(), pick(), pick()];
+    var finalReels;
+    if (isWin) {
+      var winSymbol = pick();
+      finalReels = [winSymbol, winSymbol, winSymbol];
+    } else {
+      var a = pick(), b = pick(), c;
+      do { c = pick(); } while (a === b && b === c);
+      finalReels = [a, b, c];
+    }
 
     // 立即寫入結果，即使動畫中 refresh 也會鎖定
     saveResult(isWin ? "win" : "drawn", finalReels);
