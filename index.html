@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<title>幸運抽獎機</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="試試你的手氣！幸運抽獎機，每人僅限一次，頭獎為多功能蒸氣清潔機。" />
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+<style>
+  :root {
+    --radius: 0.75rem;
+    --background: oklch(0.16 0.03 285);
+    --foreground: oklch(0.95 0.02 90);
+    --card: oklch(0.21 0.04 285);
+    --primary: oklch(0.82 0.16 88);
+    --primary-foreground: oklch(0.22 0.05 80);
+    --secondary: oklch(0.28 0.05 285);
+    --muted-foreground: oklch(0.7 0.04 285);
+    --border: oklch(0.32 0.05 285);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: "Noto Sans TC", system-ui, sans-serif;
+  }
+  main {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 4rem 1rem; gap: 2.5rem; text-align: center;
+  }
+  h1 { margin: 0; }
+  .title {
+    font-size: clamp(2.25rem, 6vw, 3.75rem);
+    font-weight: 900; letter-spacing: 0.3em; color: var(--primary);
+  }
+  .subtitle { margin-top: 1rem; color: var(--muted-foreground); }
+  .machine {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 1.5rem; padding: clamp(1.5rem, 4vw, 2.5rem);
+    box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.5);
+  }
+  .reels { display: flex; gap: clamp(0.75rem, 2vw, 1.25rem); }
+  .reel {
+    position: relative; width: 6rem; height: 7rem; overflow: hidden;
+    border-radius: 1rem; border: 2px solid var(--border); background: var(--secondary);
+  }
+  .reel .fade-top, .reel .fade-bottom {
+    position: absolute; left: 0; right: 0; height: 1.5rem; z-index: 1; pointer-events: none;
+  }
+  .reel .fade-top { top: 0; background: linear-gradient(to bottom, var(--secondary), transparent); }
+  .reel .fade-bottom { bottom: 0; background: linear-gradient(to top, var(--secondary), transparent); }
+  .strip { display: flex; flex-direction: column; align-items: center; }
+  .strip.blur { filter: blur(1.5px); }
+  .strip span { display: flex; align-items: center; justify-content: center; font-size: 3.75rem; line-height: 1; height: 112px; }
+  #draw-btn {
+    border: none; cursor: pointer; border-radius: 9999px;
+    background: var(--primary); color: var(--primary-foreground);
+    padding: 1.25rem 3.5rem; font-size: 1.5rem; font-weight: 900; letter-spacing: 0.3em;
+    box-shadow: 0 0 40px oklch(0.82 0.16 88 / 40%);
+    transition: transform 0.15s ease; font-family: inherit;
+  }
+  #draw-btn:hover:not(:disabled) { transform: scale(1.05); }
+  #draw-btn:active:not(:disabled) { transform: scale(0.95); }
+  #draw-btn:disabled { cursor: not-allowed; opacity: 0.5; }
+  .result { display: flex; flex-direction: column; align-items: center; gap: 2rem; }
+  .win-title {
+    font-size: clamp(3rem, 8vw, 6rem); font-weight: 900; letter-spacing: 0.15em;
+    background: linear-gradient(to bottom, #fef08a, #fbbf24, #ca8a04);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 0 25px oklch(0.82 0.16 88 / 60%));
+    animation: prize-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+  .drawn-title {
+    font-size: clamp(2.5rem, 7vw, 4.5rem); font-weight: 900; letter-spacing: 0.15em;
+    animation: prize-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+  .lead { max-width: 28rem; margin: 0; font-size: 1.125rem; color: var(--muted-foreground); }
+  .prize-card {
+    border: 2px solid var(--primary); border-radius: 1.5rem; background: var(--card);
+    padding: 1.5rem 2.5rem; animation: glow-pulse 1.6s ease-in-out infinite;
+  }
+  .prize-card .label { font-size: 0.875rem; letter-spacing: 0.3em; color: var(--muted-foreground); margin: 0; }
+  .prize-card .prize { margin: 0.5rem 0 0; font-size: 2.25rem; font-weight: 900; color: var(--primary); }
+  .lock-note {
+    border: 1px solid var(--border); border-radius: 9999px; background: var(--secondary);
+    padding: 0.5rem 1.25rem; font-size: 0.875rem; color: var(--muted-foreground); margin: 0;
+  }
+  @keyframes prize-pop {
+    0% { transform: scale(0.3); opacity: 0; }
+    60% { transform: scale(1.15); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  @keyframes glow-pulse {
+    0%, 100% { box-shadow: 0 0 30px oklch(0.82 0.16 88 / 40%); }
+    50% { box-shadow: 0 0 80px oklch(0.82 0.16 88 / 80%); }
+  }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script>
+(function () {
+  var STORAGE_KEY = "lucky-draw-v1";
+  var WIN_PROBABILITY = 0.05;
+  var SYMBOLS = ["🍒", "🍋", "🔔", "⭐", "💎", "🍀", "7️⃣"];
+  var WIN_SYMBOL = "💰";
+  var CELL = 112;
+  var SPIN_DURATIONS = [1800, 2850, 3900];
+
+  var app = document.getElementById("app");
+  var timers = [];
+
+  function loadStoredResult() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      if (raw === "win" || raw === "drawn") return { result: raw, reels: ["🍒", "⭐", "🍀"] };
+      var parsed = JSON.parse(raw);
+      if ((parsed.result === "win" || parsed.result === "drawn") &&
+          Array.isArray(parsed.reels) && parsed.reels.length === 3) {
+        return { result: parsed.result, reels: parsed.reels };
+      }
+      return null;
+    } catch (e) { return null; }
+  }
+
+  function saveResult(result, reels) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ result: result, reels: reels }));
+    } catch (e) { /* storage unavailable; in-memory lock still applies */ }
+  }
+
+  function fireCelebration() {
+    if (typeof confetti !== "function") return;
+    var defaults = { origin: { y: 0.7 }, zIndex: 9999 };
+    confetti(Object.assign({}, defaults, { particleCount: 120, spread: 80 }));
+    confetti(Object.assign({}, defaults, { particleCount: 60, spread: 120, startVelocity: 45 }));
+    var end = Date.now() + 2500;
+    (function frame() {
+      confetti({ particleCount: 4, angle: 60, spread: 60, origin: { x: 0, y: 0.7 }, zIndex: 9999 });
+      confetti({ particleCount: 4, angle: 120, spread: 60, origin: { x: 1, y: 0.7 }, zIndex: 9999 });
+      if (Date.now() < end) requestAnimationFrame(frame);
+    })();
+  }
+
+  function buildStrip(index, finalSymbol) {
+    var total = 26 + index * 8;
+    var arr = [];
+    for (var i = 0; i < total - 1; i++) arr.push(SYMBOLS[(i + index * 3) % SYMBOLS.length]);
+    arr.push(finalSymbol);
+    return arr;
+  }
+
+  function machineHTML(reels) {
+    var html = '<section aria-label="抽獎滾輪" class="machine"><div class="reels">';
+    for (var i = 0; i < 3; i++) {
+      var strip = buildStrip(i, reels[i]);
+      html += '<div class="reel"><div class="fade-top"></div><div class="fade-bottom"></div>' +
+        '<div class="strip" data-reel="' + i + '">';
+      for (var j = 0; j < strip.length; j++) html += "<span>" + strip[j] + "</span>";
+      html += "</div></div>";
+    }
+    return html + "</div></section>";
+  }
+
+  function positionReels(reels, spinning) {
+    var strips = app.querySelectorAll(".strip");
+    strips.forEach(function (strip) {
+      var index = Number(strip.getAttribute("data-reel"));
+      var len = strip.children.length;
+      var targetY = -(len - 1) * CELL;
+      strip.style.transition = "none";
+      strip.style.transform = "translateY(" + targetY + "px)";
+      if (!spinning) { strip.classList.remove("blur"); return; }
+      strip.classList.add("blur");
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          strip.style.transform = "translateY(0)";
+          requestAnimationFrame(function () {
+            requestAnimationFrame(function () {
+              strip.style.transition =
+                "transform " + SPIN_DURATIONS[index] + "ms cubic-bezier(0.15, 0.85, 0.25, 1)";
+              strip.style.transform = "translateY(" + targetY + "px)";
+            });
+          });
+        });
+      });
+    });
+    if (spinning) {
+      SPIN_DURATIONS.forEach(function (d, i) {
+        timers.push(setTimeout(function () {
+          var strip = app.querySelector('.strip[data-reel="' + i + '"]');
+          if (strip) strip.classList.remove("blur");
+        }, d));
+      });
+    }
+  }
+
+  function renderIdle(spinning) {
+    app.innerHTML =
+      '<header><h1 class="title">🎰 幸運抽獎機</h1>' +
+      '<p class="subtitle">三個 💰 連線即中獎　・　每人僅限抽獎一次</p></header>' +
+      machineHTML(currentReels) +
+      '<button id="draw-btn"' + (spinning ? " disabled" : "") + ">" +
+      (spinning ? "好運降臨中…" : "開始抽獎") + "</button>";
+    document.getElementById("draw-btn").addEventListener("click", draw);
+    positionReels(currentReels, spinning);
+  }
+
+  function renderWin() {
+    app.innerHTML =
+      '<div class="result">' + machineHTML(currentReels) +
+      '<h1 class="win-title">恭喜中獎</h1>' +
+      '<p class="lead">天選之人就是你！這份好運屬於你，全場為你喝采 👏✨</p>' +
+      '<div class="prize-card"><p class="label">你的專屬獎項</p>' +
+      '<p class="prize">🎁 多功能蒸氣清潔機</p></div>' +
+      '<p class="lock-note">此裝置已領取過獎項，無法再次抽獎 🔒</p></div>';
+    positionReels(currentReels, false);
+    fireCelebration();
+  }
+
+  function renderDrawn() {
+    app.innerHTML =
+      '<div class="result">' + machineHTML(currentReels) +
+      '<h1 class="drawn-title">好可惜，下次再見！</h1>' +
+      '<p class="lead">你已經抽過了，無法再次抽獎。</p></div>';
+    positionReels(currentReels, false);
+  }
+
+  var phase = "idle";
+  var currentReels = ["🍒", "⭐", "🍀"];
+
+  function draw() {
+    if (phase !== "idle") return;
+    phase = "spinning";
+
+    var roll = new Uint32Array(1);
+    crypto.getRandomValues(roll);
+    var isWin = roll[0] / 0xffffffff < WIN_PROBABILITY;
+
+    var pick = function () { return SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)]; };
+    var finalReels = isWin ? [WIN_SYMBOL, WIN_SYMBOL, WIN_SYMBOL] : [pick(), pick(), pick()];
+
+    // 立即寫入結果，即使動畫中 refresh 也會鎖定
+    saveResult(isWin ? "win" : "drawn", finalReels);
+    currentReels = finalReels;
+    renderIdle(true);
+
+    timers.push(setTimeout(function () {
+      phase = isWin ? "win" : "drawn";
+      if (isWin) renderWin(); else renderDrawn();
+    }, SPIN_DURATIONS[2] + 150));
+  }
+
+  var stored = loadStoredResult();
+  if (stored) {
+    currentReels = stored.reels;
+    phase = stored.result;
+  }
+  if (phase === "win") renderWin();
+  else if (phase === "drawn") renderDrawn();
+  else renderIdle(false);
+})();
+</script>
+</body>
+</html>
