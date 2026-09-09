@@ -200,6 +200,13 @@
     })();
   }
 
+  // 開發者重置：在 console 執行 resetLuckyDraw() 可清除紀錄重新測試
+  window.resetLuckyDraw = function () {
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+    saveCookie("");
+    window.location.reload();
+  };
+
   function buildStrip(index, finalSymbol) {
     var total = 26 + index * 8;
     var arr = [];
