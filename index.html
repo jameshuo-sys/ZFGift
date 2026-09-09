@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <title>幸運抽獎機</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="description" content="試試你的手氣！幸運抽獎機，每人僅限一次，頭獎為多功能蒸氣清潔機。" />
+<meta name="description" content="試試你的手氣！幸運抽獎機，每人僅限一次，頭獎為氣泡飲製作機。" />
 <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
 <style>
   :root {
@@ -102,7 +102,7 @@
 <script>
 (function () {
   var STORAGE_KEY = "lucky-draw-v1";
-  var WIN_PROBABILITY = 0.05;
+  var WIN_PROBABILITY = 0.035;
   var SYMBOLS = ["🍒", "🍋", "🔔", "⭐", "💎", "🍀", "7️⃣"];
   var WIN_SYMBOL = "💰";
   var CELL = 112;
@@ -111,24 +111,80 @@
   var app = document.getElementById("app");
   var timers = [];
 
-  function loadStoredResult() {
+  // 多層儲存：localStorage 為主、Cookie 為備援，避免單一管道被清除後重置
+  function saveCookie(value) {
     try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return null;
-      if (raw === "win" || raw === "drawn") return { result: raw, reels: ["🍒", "⭐", "🍀"] };
+      document.cookie = STORAGE_KEY + "=" + encodeURIComponent(value) +
+        "; max-age=315360000; path=/; SameSite=Lax";
+    } catch (e) { /* ignore */ }
+  }
+
+  function readCookie() {
+    try {
+      var m = document.cookie.match(new RegExp("(?:^|; )" + STORAGE_KEY + "=([^;]*)"));
+      return m && m[1] ? decodeURIComponent(m[1]) : null;
+    } catch (e) { return null; }
+  }
+
+  function parseStored(raw) {
+    if (!raw) return null;
+    if (raw === "win" || raw === "drawn") return { result: raw, reels: ["🍒", "⭐", "🍀"] };
+    try {
       var parsed = JSON.parse(raw);
       if ((parsed.result === "win" || parsed.result === "drawn") &&
           Array.isArray(parsed.reels) && parsed.reels.length === 3) {
         return { result: parsed.result, reels: parsed.reels };
       }
-      return null;
-    } catch (e) { return null; }
+    } catch (e) { /* fall through */ }
+    return null;
+  }
+
+  function loadStoredResult() {
+    var fromLocal = null;
+    try { fromLocal = parseStored(localStorage.getItem(STORAGE_KEY)); } catch (e) { /* ignore */ }
+    if (fromLocal) { saveCookie(JSON.stringify(fromLocal)); return fromLocal; }
+    var fromCookie = parseStored(readCookie());
+    if (fromCookie) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(fromCookie)); } catch (e) { /* ignore */ }
+      return fromCookie;
+    }
+    return null;
   }
 
   function saveResult(result, reels) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ result: result, reels: reels }));
-    } catch (e) { /* storage unavailable; in-memory lock still applies */ }
+    var payload = JSON.stringify({ result: result, reels: reels });
+    try { localStorage.setItem(STORAGE_KEY, payload); } catch (e) { /* in-memory lock still applies */ }
+    saveCookie(payload);
+  }
+
+  // 無痕／私密模式偵測：
+  // 1) Chromium 無痕模式儲存配額約為一般模式的十分之一（通常低於 120MB）
+  // 2) Firefox 私密模式會拒絕開啟 IndexedDB
+  var checkingPrivateMode = true;
+  function detectPrivateMode(callback) {
+    var done = false;
+    function finish(isPrivate) {
+      if (done) return;
+      done = true;
+      checkingPrivateMode = false;
+      callback(isPrivate);
+    }
+    function checkIDB() {
+      try {
+        var req = indexedDB.open("lucky-draw-probe");
+        req.onerror = function () { finish(true); };
+        req.onsuccess = function () { req.result.close(); finish(false); };
+      } catch (e) { finish(true); }
+      setTimeout(function () { finish(false); }, 1200);
+    }
+    if (navigator.storage && typeof navigator.storage.estimate === "function") {
+      navigator.storage.estimate().then(function (e) {
+        if (e.quota && e.quota < 150 * 1024 * 1024) { finish(true); return; }
+        checkIDB();
+      }).catch(checkIDB);
+    } else {
+      checkIDB();
+    }
   }
 
   function fireCelebration() {
@@ -214,7 +270,7 @@
       '<h1 class="win-title">恭喜中獎</h1>' +
       '<p class="lead">天選之人就是你！這份好運屬於你，全場為你喝采 👏✨</p>' +
       '<div class="prize-card"><p class="label">你的專屬獎項</p>' +
-      '<p class="prize">🎁 多功能蒸氣清潔機</p></div>' +
+      '<p class="prize">🎁 氣泡飲製作機</p></div>' +
       '<p class="lock-note">此裝置已領取過獎項，無法再次抽獎 🔒</p></div>';
     positionReels(currentReels, false);
     fireCelebration();
@@ -231,8 +287,15 @@
   var phase = "idle";
   var currentReels = ["🍒", "⭐", "🍀"];
 
+  function renderBlocked() {
+    app.innerHTML =
+      '<div class="result">' +
+      '<h1 class="drawn-title">請使用一般瀏覽模式</h1>' +
+      '<p class="lead">偵測到無痕／私密瀏覽模式。此模式無法確保「每人僅限抽獎一次」，請改用一般瀏覽視窗開啟本頁後再抽獎。</p></div>';
+  }
+
   function draw() {
-    if (phase !== "idle") return;
+    if (phase !== "idle" || checkingPrivateMode) return;
     phase = "spinning";
 
     var roll = new Uint32Array(1);
@@ -268,7 +331,15 @@
   }
   if (phase === "win") renderWin();
   else if (phase === "drawn") renderDrawn();
-  else renderIdle(false);
+  else {
+    renderIdle(false);
+    detectPrivateMode(function (isPrivate) {
+      if (isPrivate && phase === "idle") {
+        phase = "blocked";
+        renderBlocked();
+      }
+    });
+  }
 })();
 </script>
 </body>
